@@ -1,25 +1,29 @@
 #!/usr/bin/env bash
 
-function cleanup { rm -f "$FIFO"; }
-
-if [[ ':ux' == "$1" ]]; then                        # called inside tmux to take user input
+if [[ ':ux' == "$1" ]]; then                        # invoked inside tmux to take user input
 	exec 3>"$2"
-	if [[ "$3" =~ ^Allow\ use\ of\ key ]]; then       # confirm the key access
-		whiptail --yesno "$3" 10 0 --defaultno
-		STATUS="$?"
-	else                                              # ask for key passphrase
-		whiptail --passwordbox "$3" 10 0 2>&3
+	declare -a DIALOG=( --passwordbox "$3" 10 0 )     # default mode: ask for key passphrase
+	if [[ "$3" =~ ^Allow\ use\ of\ key ]]; then       # detected another mode: confirm the key access
+		DIALOG=( )
+		MTIME=$(stat "$SSH_ASKPASS_TMUX_FILENAME" --printf='%Y' 2>/dev/null) && (( $(date +'%s') - MTIME <= ${SSH_ASKPASS_TMUX_MAX_TIME:-5} )) && STATUS=0
+		[[ "$STATUS" ]] || DIALOG=( --yesno "$3" 10 0 --defaultno )
+	fi
+	if (( ${#DIALOG[@]} )); then
+		whiptail "${DIALOG[@]}" 2>&3
 		STATUS="$?"
 	fi
 	echo >&3
 	echo "$STATUS" >&3
-else                                                # called by ssh with no terminal access
-	[[ "$TMUX" ]] || exit 101
-	FIFO="$(mktemp --dry-run)"
-	mkfifo -m 0600 "$FIFO" || exit 102
-	trap cleanup EXIT
-	tmux new-window -n '+++ SSH ASK PASS +++' "$0" :ux "$FIFO" "$@"
-	mapfile -n 2 -t < "$FIFO"
-	[[ "${MAPFILE[0]}" ]] && echo "${MAPFILE[0]}"
-	exit "${MAPFILE[1]}"
-fi
+	exit
+fi                                                  # invoked by ssh
+
+function cleanup { rm -f "$FIFO"; }
+
+[[ "$TMUX" ]] || exit 101
+FIFO="$(mktemp --dry-run)"
+mkfifo -m 0600 "$FIFO" || exit 102
+trap cleanup EXIT
+tmux new-window -n '+++ SSH ASK PASS +++' "$0" :ux "$FIFO" "$@"
+mapfile -n 2 -t < "$FIFO"
+[[ "${MAPFILE[0]}" ]] && echo "${MAPFILE[0]}"
+exit "${MAPFILE[1]}"
