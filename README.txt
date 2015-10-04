@@ -59,4 +59,25 @@ You need to modify your profile string, here is an example:
 LOCAL KEY USAGE
 ===============
 
-FIXME
+Typically most of your ssh activity originates from a secure workstation,
+and constant key usage confirmation is really irritating, so there is
+a built-in facility to confirm the key usage programmatically. The script
+will run a command from an environment variable SSH_ASKPASS_TMUX_CHECK and
+will exit with 0 if that command exited with 0. You are free to implement
+anything that suits your needs, here is what I came up with:
+
+$ env | grep SSH_ASK
+SSH_ASKPASS_TMUX_CHECK=/home/stronny/bin/ssh-askpass-tmux-check
+
+$ cat bin/ssh-askpass-tmux-check
+#!/usr/bin/env bash
+MT="$(stat "$HOME/.ssh/config_read" --printf='%Y' 2>/dev/null)"
+(( $? )) || (( $(date +'%s') - MT <= 5 ))
+
+$ incrontab -l
+/home/stronny/.ssh/config IN_ACCESS touch $@_read
+
+So in a nutshell whenever .ssh/config is accessed, incrond will touch
+a file, checkscript will then grant access for key usage unless the file's
+mtime is older than 5 seconds. Why not just use atime? Well, I run with
+-o rw,noatime, so, yeah.

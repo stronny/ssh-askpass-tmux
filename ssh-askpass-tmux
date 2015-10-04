@@ -2,28 +2,27 @@
 
 if [[ ':ux' == "$1" ]]; then                        # invoked inside tmux to take user input
 	exec 3>"$2"
-	declare -a DIALOG=( --passwordbox "$3" 10 0 )     # default mode: ask for key passphrase
-	if [[ "$3" =~ ^Allow\ use\ of\ key ]]; then       # detected another mode: confirm the key access
-		DIALOG=( )
-		MTIME=$(stat "$SSH_ASKPASS_TMUX_FILENAME" --printf='%Y' 2>/dev/null) && (( $(date +'%s') - MTIME <= ${SSH_ASKPASS_TMUX_MAX_TIME:-5} )) && STATUS=0
-		[[ "$STATUS" ]] || DIALOG=( --yesno "$3" 10 0 --defaultno )
-	fi
-	if (( ${#DIALOG[@]} )); then
-		whiptail "${DIALOG[@]}" 2>&3
-		STATUS="$?"
-	fi
+	shift 2
+	whiptail "$@" 2>&3
+	STATUS="$?"
 	echo >&3
 	echo "$STATUS" >&3
 	exit
-fi                                                  # invoked by ssh
+fi
 
-function cleanup { rm -f "$FIFO"; }
+if [[ "$1" =~ ^Allow\ use\ of\ key ]]; then         # confirm key usage
+	[[ "$SSH_ASKPASS_TMUX_CHECK" ]] && "$SSH_ASKPASS_TMUX_CHECK" &>/dev/null && exit 0 # local check confirms key usage
+	UX=( --yesno "$1" 10 0 --defaultno )
+else                                                # ask for key passphrase
+	UX=( --passwordbox "$1" 10 0 )
+fi
 
 [[ "$TMUX" ]] || exit 101
 FIFO="$(mktemp --dry-run)"
-mkfifo -m 0600 "$FIFO" || exit 102
+function cleanup { rm -f "$FIFO"; }
 trap cleanup EXIT
-tmux new-window -n '+++ SSH ASK PASS +++' "$0" :ux "$FIFO" "$@"
+mkfifo -m 0600 "$FIFO" || exit 102
+tmux new-window -n '+++ SSH ASK PASS +++' "$0" :ux "$FIFO" "${UX[@]}"
 mapfile -n 2 -t < "$FIFO"
 [[ "${MAPFILE[0]}" ]] && echo "${MAPFILE[0]}"
 exit "${MAPFILE[1]}"
